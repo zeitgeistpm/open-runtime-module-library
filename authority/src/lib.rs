@@ -167,10 +167,6 @@ pub mod module {
 		FailedToSchedule,
 		/// Failed to cancel a task.
 		FailedToCancel,
-		/// Failed to fast track a task.
-		FailedToFastTrack,
-		/// Failed to delay a task.
-		FailedToDelay,
 	}
 
 	#[pallet::event]
@@ -285,8 +281,7 @@ pub mod module {
 			};
 
 			T::AuthorityConfig::check_fast_track_schedule(origin, &initial_origin, new_delay)?;
-			T::Scheduler::reschedule_named((&initial_origin, task_id).encode(), when)
-				.map_err(|_| Error::<T>::FailedToFastTrack)?;
+			T::Scheduler::reschedule_named((&initial_origin, task_id).encode(), when)?;
 
 			Self::deposit_event(Event::FastTracked(initial_origin, task_id, dispatch_at));
 			Ok(().into())
@@ -305,8 +300,7 @@ pub mod module {
 			T::Scheduler::reschedule_named(
 				(&initial_origin, task_id).encode(),
 				DispatchTime::After(additional_delay),
-			)
-			.map_err(|_| Error::<T>::FailedToDelay)?;
+			)?;
 
 			let now = frame_system::Pallet::<T>::block_number();
 			let dispatch_at = now.saturating_add(additional_delay);
