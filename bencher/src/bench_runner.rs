@@ -3,7 +3,7 @@ use super::{
 	tracker::{BenchTracker, BenchTrackerExt},
 };
 use frame_benchmarking::frame_support::sp_runtime::traits::Block;
-use sc_executor::{WasmExecutionMethod, WasmExecutor};
+use sc_executor::{WasmExecutionMethod, WasmExecutor, error::Error};
 use sc_executor_common::runtime_blob::RuntimeBlob;
 use sp_externalities::Extensions;
 use sp_state_machine::{Ext, OverlayedChanges, StorageTransactionCache};
@@ -16,7 +16,7 @@ type ComposeHostFunctions = (
 );
 
 /// Run benches
-pub fn run<B: Block>(wasm_code: Vec<u8>) -> std::result::Result<Vec<u8>, String> {
+pub fn run<B: Block>(wasm_code: Vec<u8>) -> std::result::Result<Vec<u8>, Error> {
 	let mut overlay = OverlayedChanges::default();
 	let mut cache = StorageTransactionCache::default();
 	let state = sc_client_db::BenchmarkingState::<B>::new(Default::default(), Default::default(), false, true).unwrap();
