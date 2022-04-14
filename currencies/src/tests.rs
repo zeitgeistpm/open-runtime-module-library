@@ -309,5 +309,23 @@ fn call_event_should_work() {
 				who: ALICE,
 				amount: 20,
 			}));
+
+			<Currencies as MultiCurrency<AccountId>>::slash(X_TOKEN_ID, &ALICE, 33);
+			assert_eq!(Currencies::free_balance(X_TOKEN_ID, &ALICE), 87);
+			System::assert_last_event(Event::Currencies(crate::Event::Slashed {
+				currency_id: X_TOKEN_ID,
+				who: ALICE,
+				amount: 33,
+				gap: 0,
+			}));
+
+			<Currencies as MultiCurrency<AccountId>>::slash(X_TOKEN_ID, &ALICE, 90);
+			assert_eq!(Currencies::free_balance(X_TOKEN_ID, &ALICE), 0);
+			System::assert_last_event(Event::Currencies(crate::Event::Slashed {
+				currency_id: X_TOKEN_ID,
+				who: ALICE,
+				amount: 90,
+				gap: 3,
+			}));
 		});
 }

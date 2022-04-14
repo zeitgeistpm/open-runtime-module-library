@@ -137,6 +137,13 @@ pub mod module {
 			who: T::AccountId,
 			amount: BalanceOf<T>,
 		},
+		/// Slash success.
+		Slashed {
+			currency_id: CurrencyIdOf<T>,
+			who: T::AccountId,
+			amount: BalanceOf<T>,
+            gap: BalanceOf<T>,
+		},
 	}
 
 	#[pallet::pallet]
@@ -315,11 +322,18 @@ impl<T: Config> MultiCurrency<T::AccountId> for Pallet<T> {
 	}
 
 	fn slash(currency_id: Self::CurrencyId, who: &T::AccountId, amount: Self::Balance) -> Self::Balance {
-		if currency_id == T::GetNativeCurrencyId::get() {
+		let gap = if currency_id == T::GetNativeCurrencyId::get() {
 			T::NativeCurrency::slash(who, amount)
 		} else {
 			T::MultiCurrency::slash(currency_id, who, amount)
-		}
+		};
+		Self::deposit_event(Event::Slashed {
+			currency_id,
+			who: who.clone(),
+			amount,
+            gap,
+		});
+		gap
 	}
 }
 
