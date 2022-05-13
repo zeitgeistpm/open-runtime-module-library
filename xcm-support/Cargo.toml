@@ -15,8 +15,8 @@ sp-runtime = { git = "https://github.com/purestake/substrate", branch = "moonbea
 
 frame-support = { git = "https://github.com/purestake/substrate", branch = "moonbeam-polkadot-v0.9.19", default-features = false }
 
-xcm = { git = "https://github.com/purestake/polkadot", branch = "release-v0.9.19", default-features = false }
-xcm-executor = { git = "https://github.com/purestake/polkadot", branch = "release-v0.9.19", default-features = false }
+xcm = { git = "https://github.com/purestake/polkadot", branch = "moonbeam-polkadot-v0.9.19", default-features = false }
+xcm-executor = { git = "https://github.com/purestake/polkadot", branch = "moonbeam-polkadot-v0.9.19", default-features = false }
 
 orml-traits = { path = "../traits", version = "0.4.1-dev", default-features = false }
 
