@@ -1,4 +1,5 @@
 use frame_support::{traits::ConstU32};
+use sp_std::Vec;
 use xcm::latest::prelude::*;
 
 use crate::location::RelativeLocations;
