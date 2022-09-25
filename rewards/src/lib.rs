@@ -1,5 +1,6 @@
-#![allow(clippy::unused_unit)]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::unused_unit)]
+#![allow(clippy::too_many_arguments)]
 
 mod mock;
 mod tests;
@@ -42,6 +43,7 @@ pub use module::*;
 
 #[frame_support::pallet]
 pub mod module {
+
 	use super::*;
 
 	#[pallet::config]
@@ -75,10 +77,14 @@ pub mod module {
 		type Handler: RewardHandler<Self::AccountId, Self::CurrencyId, Balance = Self::Balance, PoolId = Self::PoolId>;
 	}
 
+	type WithdrawnRewards<T> = BTreeMap<<T as Config>::CurrencyId, <T as Config>::Balance>;
+
 	#[pallet::error]
 	pub enum Error<T> {
 		/// Pool does not exist
 		PoolDoesNotExist,
+		ShareDoesNotExist,
+		CanSplitOnlyLessThanShare,
 	}
 
 	/// Record reward pool info.
@@ -101,7 +107,7 @@ pub mod module {
 		T::PoolId,
 		Twox64Concat,
 		T::AccountId,
-		(T::Share, BTreeMap<T::CurrencyId, T::Balance>),
+		(T::Share, WithdrawnRewards<T>),
 		ValueQuery,
 	>;
 
@@ -272,34 +278,136 @@ impl<T: Config> Pallet<T> {
 					let total_shares = U256::from(pool_info.total_shares.to_owned().saturated_into::<u128>());
 					pool_info.rewards.iter_mut().for_each(
 						|(reward_currency, (total_reward, total_withdrawn_reward))| {
-							let withdrawn_reward = withdrawn_rewards.get(reward_currency).copied().unwrap_or_default();
-
-							let total_reward_proportion: T::Balance =
-								U256::from(share.to_owned().saturated_into::<u128>())
-									.saturating_mul(U256::from(total_reward.to_owned().saturated_into::<u128>()))
-									.checked_div(total_shares)
-									.unwrap_or_default()
-									.as_u128()
-									.unique_saturated_into();
-
-							let reward_to_withdraw = total_reward_proportion
-								.saturating_sub(withdrawn_reward)
-								.min(total_reward.saturating_sub(*total_withdrawn_reward));
-
-							if reward_to_withdraw.is_zero() {
-								return;
-							}
-
-							*total_withdrawn_reward = total_withdrawn_reward.saturating_add(reward_to_withdraw);
-							withdrawn_rewards
-								.insert(*reward_currency, withdrawn_reward.saturating_add(reward_to_withdraw));
-
-							// pay reward to `who`
-							T::Handler::payout(who, pool, *reward_currency, reward_to_withdraw);
+							Self::claim_one(
+								withdrawn_rewards,
+								*reward_currency,
+								share.to_owned(),
+								total_reward.to_owned(),
+								total_shares,
+								total_withdrawn_reward,
+								who,
+								pool,
+							);
 						},
 					);
 				});
 			}
 		});
+	}
+
+	pub fn claim_reward(who: &T::AccountId, pool: &T::PoolId, reward_currency: T::CurrencyId) {
+		SharesAndWithdrawnRewards::<T>::mutate_exists(pool, who, |maybe_share_withdrawn| {
+			if let Some((share, withdrawn_rewards)) = maybe_share_withdrawn {
+				if share.is_zero() {
+					return;
+				}
+
+				PoolInfos::<T>::mutate(pool, |pool_info| {
+					let total_shares = U256::from(pool_info.total_shares.to_owned().saturated_into::<u128>());
+					if let Some((total_reward, total_withdrawn_reward)) = pool_info.rewards.get_mut(&reward_currency) {
+						Self::claim_one(
+							withdrawn_rewards,
+							reward_currency,
+							share.to_owned(),
+							total_reward.to_owned(),
+							total_shares,
+							total_withdrawn_reward,
+							who,
+							pool,
+						);
+					}
+				});
+			}
+		});
+	}
+
+	/// Splits share into two parts.
+	///
+	/// `move_share` - amount of share to remove and put into `other` share
+	/// `other` - new account who will own new share
+	///
+	/// Similar too claim and add 2 shares later, but does not requires pool
+	/// inflation and is more efficient.
+	pub fn transfer_share_and_rewards(
+		who: &T::AccountId,
+		pool: &T::PoolId,
+		move_share: T::Share,
+		other: &T::AccountId,
+	) -> DispatchResult {
+		SharesAndWithdrawnRewards::<T>::mutate(pool, other, |increased_share| {
+			let (increased_share, increased_rewards) = increased_share;
+			SharesAndWithdrawnRewards::<T>::mutate_exists(pool, who, |share| {
+				let (share, rewards) = share.as_mut().ok_or(Error::<T>::ShareDoesNotExist)?;
+				ensure!(move_share < *share, Error::<T>::CanSplitOnlyLessThanShare);
+				for (reward_currency, balance) in rewards {
+					// u128 * u128 is always less than u256
+					// move_share / share always less then 1 and share > 0
+					// so final results is computable and is always less or equal than u128
+					let move_balance = U256::from(balance.to_owned().saturated_into::<u128>())
+						* U256::from(move_share.to_owned().saturated_into::<u128>())
+						/ U256::from(share.to_owned().saturated_into::<u128>());
+					let move_balance: Option<u128> = move_balance.try_into().ok();
+					if let Some(move_balance) = move_balance {
+						let move_balance: T::Balance = move_balance.unique_saturated_into();
+						*balance = balance.saturating_sub(move_balance);
+						increased_rewards
+							.entry(*reward_currency)
+							.and_modify(|increased_reward| {
+								*increased_reward = increased_reward.saturating_add(move_balance);
+							})
+							.or_insert(move_balance);
+					}
+				}
+				*share = share.saturating_sub(move_share);
+				*increased_share = increased_share.saturating_add(move_share);
+				Ok(())
+			})
+		})
+	}
+
+	#[allow(clippy::too_many_arguments)] // just we need to have all these to do the stuff
+	fn claim_one(
+		withdrawn_rewards: &mut BTreeMap<T::CurrencyId, T::Balance>,
+		reward_currency: T::CurrencyId,
+		share: T::Share,
+		total_reward: T::Balance,
+		total_shares: U256,
+		total_withdrawn_reward: &mut T::Balance,
+		who: &T::AccountId,
+		pool: &T::PoolId,
+	) {
+		let withdrawn_reward = withdrawn_rewards.get(&reward_currency).copied().unwrap_or_default();
+		let reward_to_withdraw = Self::reward_to_withdraw(
+			share,
+			total_reward,
+			total_shares,
+			withdrawn_reward,
+			total_withdrawn_reward.to_owned(),
+		);
+		if !reward_to_withdraw.is_zero() {
+			*total_withdrawn_reward = total_withdrawn_reward.saturating_add(reward_to_withdraw);
+			withdrawn_rewards.insert(reward_currency, withdrawn_reward.saturating_add(reward_to_withdraw));
+
+			// pay reward to `who`
+			T::Handler::payout(who, pool, reward_currency, reward_to_withdraw);
+		}
+	}
+
+	fn reward_to_withdraw(
+		share: T::Share,
+		total_reward: T::Balance,
+		total_shares: U256,
+		withdrawn_reward: T::Balance,
+		total_withdrawn_reward: T::Balance,
+	) -> T::Balance {
+		let total_reward_proportion: T::Balance = U256::from(share.saturated_into::<u128>())
+			.saturating_mul(U256::from(total_reward.saturated_into::<u128>()))
+			.checked_div(total_shares)
+			.unwrap_or_default()
+			.as_u128()
+			.unique_saturated_into();
+		total_reward_proportion
+			.saturating_sub(withdrawn_reward)
+			.min(total_reward.saturating_sub(total_withdrawn_reward))
 	}
 }

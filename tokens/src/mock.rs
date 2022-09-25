@@ -130,6 +130,7 @@ impl pallet_treasury::Config for Runtime {
 	type SpendFunds = ();
 	type WeightInfo = ();
 	type MaxApprovals = MaxApprovals;
+	type SpendOrigin = frame_support::traits::NeverEnsureOrigin<Balance>;
 }
 
 thread_local! {
@@ -197,6 +198,8 @@ impl pallet_elections_phragmen::Config for Runtime {
 	type TermDuration = ConstU64<5>;
 	type DesiredMembers = ConstU32<2>;
 	type DesiredRunnersUp = ConstU32<2>;
+	type MaxCandidates = ConstU32<5>;
+	type MaxVoters = ConstU32<5>;
 	type LoserCandidate = ();
 	type KickedMember = ();
 	type WeightInfo = ();
@@ -266,7 +269,7 @@ impl Happened<(AccountId, CurrencyId)> for TrackKilledAccounts {
 }
 
 parameter_types! {
-	pub DustReceiver: AccountId = PalletId(*b"orml/dst").into_account();
+	pub DustReceiver: AccountId = PalletId(*b"orml/dst").into_account_truncating();
 }
 
 impl Config for Runtime {

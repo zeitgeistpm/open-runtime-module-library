@@ -32,7 +32,7 @@ use frame_support::{
 	ensure,
 	pallet_prelude::*,
 	traits::{Currency, EnsureOrigin, ExistenceRequirement, Get, LockIdentifier, LockableCurrency, WithdrawReasons},
-	transactional, BoundedVec,
+	BoundedVec,
 };
 use frame_system::{ensure_root, ensure_signed, pallet_prelude::*};
 use scale_info::TypeInfo;
@@ -59,7 +59,7 @@ pub const VESTING_LOCK_ID: LockIdentifier = *b"ormlvest";
 /// Benefits would be granted gradually, `per_period` amount every `period`
 /// of blocks after `start`.
 #[derive(Clone, Encode, Decode, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
-pub struct VestingSchedule<BlockNumber, Balance: HasCompact> {
+pub struct VestingSchedule<BlockNumber, Balance: MaxEncodedLen + HasCompact> {
 	/// Vesting starting block
 	pub start: BlockNumber,
 	/// Number of blocks between vest
@@ -71,7 +71,9 @@ pub struct VestingSchedule<BlockNumber, Balance: HasCompact> {
 	pub per_period: Balance,
 }
 
-impl<BlockNumber: AtLeast32Bit + Copy, Balance: AtLeast32Bit + Copy> VestingSchedule<BlockNumber, Balance> {
+impl<BlockNumber: AtLeast32Bit + Copy, Balance: AtLeast32Bit + MaxEncodedLen + Copy>
+	VestingSchedule<BlockNumber, Balance>
+{
 	/// Returns the end of all periods, `None` if calculation overflows.
 	pub fn end(&self) -> Option<BlockNumber> {
 		// period * period_count + start
@@ -335,7 +337,6 @@ impl<T: Config> Pallet<T> {
 		})
 	}
 
-	#[transactional]
 	fn do_vested_transfer(from: &T::AccountId, to: &T::AccountId, schedule: VestingScheduleOf<T>) -> DispatchResult {
 		let schedule_amount = ensure_valid_vesting_schedule::<T>(&schedule)?;
 

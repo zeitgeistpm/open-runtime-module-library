@@ -507,3 +507,63 @@ fn share_to_zero_removes_storage() {
 		assert_eq!(SharesAndWithdrawnRewards::<Runtime>::contains_key(DOT_POOL, BOB), false);
 	});
 }
+
+#[test]
+fn claim_single_reward() {
+	ExtBuilder::default().build().execute_with(|| {
+		assert_eq!(RewardsModule::pool_infos(DOT_POOL), PoolInfo::default());
+
+		RewardsModule::add_share(&ALICE, &DOT_POOL, 100);
+
+		assert_ok!(RewardsModule::accumulate_reward(&DOT_POOL, NATIVE_COIN, 100));
+		assert_ok!(RewardsModule::accumulate_reward(&DOT_POOL, STABLE_COIN, 200));
+		RewardsModule::claim_reward(&ALICE, &DOT_POOL, STABLE_COIN);
+
+		assert_eq!(
+			RewardsModule::pool_infos(DOT_POOL),
+			PoolInfo {
+				total_shares: 100,
+				rewards: vec![(NATIVE_COIN, (100, 0)), (STABLE_COIN, (200, 200))]
+					.into_iter()
+					.collect(),
+			}
+		);
+	});
+}
+
+#[test]
+fn transfer_share_and_rewards() {
+	ExtBuilder::default().build().execute_with(|| {
+		RewardsModule::add_share(&ALICE, &DOT_POOL, 100);
+		assert_ok!(RewardsModule::accumulate_reward(&DOT_POOL, NATIVE_COIN, 100));
+		RewardsModule::add_share(&BOB, &DOT_POOL, 100);
+		let pool_info = RewardsModule::pool_infos(DOT_POOL);
+		assert_ok!(RewardsModule::transfer_share_and_rewards(&ALICE, &DOT_POOL, 33, &BOB));
+		assert_ok!(RewardsModule::transfer_share_and_rewards(&ALICE, &DOT_POOL, 33, &CAROL));
+		let new_pool_info = RewardsModule::pool_infos(DOT_POOL);
+		assert_eq!(pool_info, new_pool_info, "reward transfer does not affect the pool");
+
+		assert_eq!(
+			RewardsModule::shares_and_withdrawn_rewards(DOT_POOL, ALICE),
+			(34, Default::default())
+		);
+		assert_eq!(
+			RewardsModule::shares_and_withdrawn_rewards(DOT_POOL, BOB),
+			(133, vec![(NATIVE_COIN, 100)].into_iter().collect())
+		);
+		assert_eq!(
+			RewardsModule::shares_and_withdrawn_rewards(DOT_POOL, CAROL),
+			(33, Default::default())
+		);
+		assert_ok!(RewardsModule::transfer_share_and_rewards(&BOB, &DOT_POOL, 10, &CAROL));
+		assert_eq!(
+			RewardsModule::shares_and_withdrawn_rewards(DOT_POOL, CAROL),
+			(43, vec![(NATIVE_COIN, 100 * 10 / 133)].into_iter().collect())
+		);
+
+		assert_noop!(
+			RewardsModule::transfer_share_and_rewards(&CAROL, &DOT_POOL, 1000, &ALICE),
+			Error::<Runtime>::CanSplitOnlyLessThanShare
+		);
+	});
+}
