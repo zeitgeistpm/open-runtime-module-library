@@ -1,4 +1,4 @@
-use sp_runtime::{traits::ConstU32, WeakBoundedVec};
+use frame_support::{traits::ConstU32, WeakBoundedVec};
 use sp_std::prelude::*;
 use xcm::latest::prelude::*;
 

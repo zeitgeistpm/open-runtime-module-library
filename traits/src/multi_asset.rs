@@ -1,4 +1,4 @@
-use sp_runtime::{traits::ConstU32, WeakBoundedVec};
+use frame_support::{traits::ConstU32, WeakBoundedVec};
 use xcm::latest::prelude::*;
 
 use crate::location::RelativeLocations;
