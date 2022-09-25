@@ -2,9 +2,11 @@
 // Older clippy versions give a false positive on the expansion of [pallet::call].
 // This is fixed in https://github.com/rust-lang/rust-clippy/issues/8321
 #![allow(clippy::large_enum_variant)]
+#![allow(clippy::too_many_arguments)]
 
-use frame_support::{pallet_prelude::*, traits::EnsureOrigin, transactional};
+use frame_support::{pallet_prelude::*, traits::EnsureOriginWithArg};
 use frame_system::pallet_prelude::*;
+pub use orml_traits::asset_registry::AssetMetadata;
 use orml_traits::asset_registry::AssetProcessor;
 use scale_info::TypeInfo;
 use sp_runtime::{
@@ -19,20 +21,12 @@ pub use module::*;
 pub use weights::WeightInfo;
 
 mod impls;
-mod mock;
-mod tests;
 mod weights;
 
-/// Data describing the asset properties.
-#[derive(scale_info::TypeInfo, Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug)]
-pub struct AssetMetadata<Balance, CustomMetadata: Parameter + Member + TypeInfo> {
-	pub decimals: u32,
-	pub name: Vec<u8>,
-	pub symbol: Vec<u8>,
-	pub existential_deposit: Balance,
-	pub location: Option<VersionedMultiLocation>,
-	pub additional: CustomMetadata,
-}
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+mod tests;
 
 #[frame_support::pallet]
 pub mod module {
@@ -46,10 +40,10 @@ pub mod module {
 		type CustomMetadata: Parameter + Member + TypeInfo;
 
 		/// The type used as a unique asset id,
-		type AssetId: Parameter + Member + Default + TypeInfo;
+		type AssetId: Parameter + Member + Default + TypeInfo + MaybeSerializeDeserialize;
 
-		/// The origin that is allowed to manipulate metadata.
-		type AuthorityOrigin: EnsureOrigin<<Self as frame_system::Config>::Origin>;
+		/// Checks that an origin has the authority to register/update an asset
+		type AuthorityOrigin: EnsureOriginWithArg<Self::Origin, Option<Self::AssetId>>;
 
 		/// A filter ran upon metadata registration that assigns an is and
 		/// potentially modifies the supplied metadata.
@@ -88,10 +82,6 @@ pub mod module {
 			asset_id: T::AssetId,
 			metadata: AssetMetadata<T::Balance, T::CustomMetadata>,
 		},
-		SetLocation {
-			asset_id: T::AssetId,
-			location: Box<VersionedMultiLocation>,
-		},
 	}
 
 	/// The metadata of an asset, indexed by asset id.
@@ -113,21 +103,31 @@ pub mod module {
 
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
-		_phantom: PhantomData<T>,
+		pub assets: Vec<(T::AssetId, Vec<u8>)>,
+		pub last_asset_id: T::AssetId,
 	}
 
 	#[cfg(feature = "std")]
 	impl<T: Config> Default for GenesisConfig<T> {
 		fn default() -> Self {
 			Self {
-				_phantom: Default::default(),
+				assets: vec![],
+				last_asset_id: Default::default(),
 			}
 		}
 	}
 
 	#[pallet::genesis_build]
 	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
-		fn build(&self) {}
+		fn build(&self) {
+			self.assets.iter().for_each(|(asset_id, metadata_encoded)| {
+				let metadata = AssetMetadata::decode(&mut &metadata_encoded[..]).expect("Error decoding AssetMetadata");
+				Pallet::<T>::do_register_asset_without_asset_processor(metadata, asset_id.clone())
+					.expect("Error registering Asset");
+			});
+
+			LastAssetId::<T>::set(self.last_asset_id.clone());
+		}
 	}
 
 	#[pallet::pallet]
@@ -141,20 +141,17 @@ pub mod module {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(T::WeightInfo::register_asset())]
-		#[transactional]
 		pub fn register_asset(
 			origin: OriginFor<T>,
 			metadata: AssetMetadata<T::Balance, T::CustomMetadata>,
 			asset_id: Option<T::AssetId>,
 		) -> DispatchResult {
-			T::AuthorityOrigin::ensure_origin(origin)?;
+			T::AuthorityOrigin::ensure_origin(origin, &asset_id)?;
 
 			Self::do_register_asset(metadata, asset_id)
 		}
 
-		#[allow(clippy::too_many_arguments)]
 		#[pallet::weight(T::WeightInfo::update_asset())]
-		#[transactional]
 		pub fn update_asset(
 			origin: OriginFor<T>,
 			asset_id: T::AssetId,
@@ -165,7 +162,7 @@ pub mod module {
 			location: Option<Option<VersionedMultiLocation>>,
 			additional: Option<T::CustomMetadata>,
 		) -> DispatchResult {
-			T::AuthorityOrigin::ensure_origin(origin)?;
+			T::AuthorityOrigin::ensure_origin(origin, &Some(asset_id.clone()))?;
 
 			Self::do_update_asset(
 				asset_id,

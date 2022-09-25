@@ -2,12 +2,16 @@
 
 use super::*;
 use crate as orml_asset_registry;
-use crate::tests::para::{AssetRegistry, CustomMetadata, Origin, Tokens, TreasuryAccount};
+use crate::tests::para::{AdminAssetTwo, AssetRegistry, CustomMetadata, Origin, Tokens, TreasuryAccount};
 use frame_support::{assert_noop, assert_ok};
-use mock::*;
+use mock::{para::Call, *};
 use orml_traits::MultiCurrency;
 use polkadot_parachain::primitives::Sibling;
-use sp_runtime::AccountId32;
+
+use sp_runtime::{
+	traits::{AccountIdConversion, BadOrigin, Dispatchable},
+	AccountId32,
+};
 use xcm_simulator::TestExt;
 
 fn treasury_account() -> AccountId32 {
@@ -15,18 +19,15 @@ fn treasury_account() -> AccountId32 {
 }
 
 fn sibling_a_account() -> AccountId32 {
-	use sp_runtime::traits::AccountIdConversion;
-	Sibling::from(1).into_account()
+	Sibling::from(1).into_account_truncating()
 }
 
 fn sibling_b_account() -> AccountId32 {
-	use sp_runtime::traits::AccountIdConversion;
-	Sibling::from(2).into_account()
+	Sibling::from(2).into_account_truncating()
 }
 
 fn sibling_c_account() -> AccountId32 {
-	use sp_runtime::traits::AccountIdConversion;
-	Sibling::from(3).into_account()
+	Sibling::from(3).into_account_truncating()
 }
 
 // Not used in any unit tests, but it's super helpful for debugging. Let's
@@ -45,11 +46,42 @@ fn dummy_metadata() -> AssetMetadata<<para::Runtime as orml_asset_registry::Conf
 		name: "para A native token".as_bytes().to_vec(),
 		symbol: "paraA".as_bytes().to_vec(),
 		existential_deposit: 0,
-		location: Some(MultiLocation::new(1, X2(Parachain(1), GeneralKey(vec![0]))).into()),
+		location: Some(MultiLocation::new(1, X2(Parachain(1), GeneralKey(vec![0].try_into().unwrap()))).into()),
 		additional: CustomMetadata {
 			fee_per_second: 1_000_000_000_000,
 		},
 	}
+}
+
+#[test]
+fn genesis_issuance_should_work() {
+	TestNet::reset();
+
+	ParaG::execute_with(|| {
+		let metadata1 = AssetMetadata {
+			decimals: 12,
+			name: "para G native token".as_bytes().to_vec(),
+			symbol: "paraG".as_bytes().to_vec(),
+			existential_deposit: 0,
+			location: None,
+			additional: CustomMetadata {
+				fee_per_second: 1_000_000_000_000,
+			},
+		};
+		let metadata2 = AssetMetadata {
+			decimals: 12,
+			name: "para G foreign token".as_bytes().to_vec(),
+			symbol: "paraF".as_bytes().to_vec(),
+			existential_deposit: 0,
+			location: None,
+			additional: CustomMetadata {
+				fee_per_second: 1_000_000_000_000,
+			},
+		};
+		assert_eq!(AssetRegistry::metadata(4).unwrap(), metadata1);
+		assert_eq!(AssetRegistry::metadata(5).unwrap(), metadata2);
+		assert_eq!(LastAssetId::<para::Runtime>::get(), 5);
+	});
 }
 
 #[test]
@@ -64,7 +96,7 @@ fn send_self_parachain_asset_to_sibling() {
 	});
 
 	ParaA::execute_with(|| {
-		metadata.location = Some(MultiLocation::new(0, X1(GeneralKey(vec![0]))).into());
+		metadata.location = Some(MultiLocation::new(0, X1(GeneralKey(vec![0].try_into().unwrap()))).into());
 		AssetRegistry::register_asset(Origin::root(), metadata, None).unwrap();
 
 		assert_ok!(ParaTokens::deposit(CurrencyId::RegisteredAsset(1), &ALICE, 1_000));
@@ -116,7 +148,7 @@ fn send_sibling_asset_to_non_reserve_sibling() {
 		AssetRegistry::register_asset(
 			Origin::root(),
 			AssetMetadata {
-				location: Some(MultiLocation::new(1, X2(Parachain(2), GeneralKey(vec![0]))).into()),
+				location: Some(MultiLocation::new(1, X2(Parachain(2), GeneralKey(vec![0].try_into().unwrap()))).into()),
 				..dummy_metadata()
 			},
 			None,
@@ -129,7 +161,7 @@ fn send_sibling_asset_to_non_reserve_sibling() {
 		AssetRegistry::register_asset(
 			Origin::root(),
 			AssetMetadata {
-				location: Some(MultiLocation::new(0, X1(GeneralKey(vec![0]))).into()),
+				location: Some(MultiLocation::new(0, X1(GeneralKey(vec![0].try_into().unwrap()))).into()),
 				..dummy_metadata()
 			},
 			None,
@@ -146,7 +178,7 @@ fn send_sibling_asset_to_non_reserve_sibling() {
 		AssetRegistry::register_asset(
 			Origin::root(),
 			AssetMetadata {
-				location: Some(MultiLocation::new(1, X2(Parachain(2), GeneralKey(vec![0]))).into()),
+				location: Some(MultiLocation::new(1, X2(Parachain(2), GeneralKey(vec![0].try_into().unwrap()))).into()),
 				..dummy_metadata()
 			},
 			None,
@@ -205,7 +237,7 @@ fn test_sequential_id_normal_behavior() {
 		let metadata2 = AssetMetadata {
 			name: "para A native token 2".as_bytes().to_vec(),
 			symbol: "paraA2".as_bytes().to_vec(),
-			location: Some(MultiLocation::new(1, X2(Parachain(1), GeneralKey(vec![1]))).into()),
+			location: Some(MultiLocation::new(1, X2(Parachain(1), GeneralKey(vec![1].try_into().unwrap()))).into()),
 			..dummy_metadata()
 		};
 		AssetRegistry::register_asset(Origin::root(), metadata1.clone(), None).unwrap();
@@ -242,7 +274,7 @@ fn test_fixed_rate_asset_trader() {
 
 	ParaA::execute_with(|| {
 		let para_a_metadata = AssetMetadata {
-			location: Some(MultiLocation::new(0, X1(GeneralKey(vec![0]))).into()),
+			location: Some(MultiLocation::new(0, X1(GeneralKey(vec![0].try_into().unwrap()))).into()),
 			..metadata.clone()
 		};
 		AssetRegistry::register_asset(Origin::root(), para_a_metadata, None).unwrap();
@@ -345,8 +377,12 @@ fn test_register_duplicate_location_returns_error() {
 		let metadata = dummy_metadata();
 
 		assert_ok!(AssetRegistry::register_asset(Origin::root(), metadata.clone(), None));
+		let register_asset = Call::AssetRegistry(crate::Call::<para::Runtime>::register_asset {
+			metadata: metadata.clone(),
+			asset_id: None,
+		});
 		assert_noop!(
-			AssetRegistry::register_asset(Origin::root(), metadata.clone(), None),
+			register_asset.dispatch(Origin::root()),
 			Error::<para::Runtime>::ConflictingLocation
 		);
 	});
@@ -382,7 +418,7 @@ fn test_update_metadata_works() {
 			name: "para A native token2".as_bytes().to_vec(),
 			symbol: "paraA2".as_bytes().to_vec(),
 			existential_deposit: 1,
-			location: Some(MultiLocation::new(1, X2(Parachain(1), GeneralKey(vec![1]))).into()),
+			location: Some(MultiLocation::new(1, X2(Parachain(1), GeneralKey(vec![1].try_into().unwrap()))).into()),
 			additional: CustomMetadata {
 				fee_per_second: 2_000_000_000_000,
 			},
@@ -459,5 +495,35 @@ fn test_existential_deposits() {
 			Tokens::transfer(Some(ALICE).into(), CHARLIE, CurrencyId::RegisteredAsset(1), 50),
 			orml_tokens::Error::<para::Runtime>::ExistentialDeposit
 		);
+	});
+}
+
+#[test]
+fn test_asset_authority() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		let metadata = dummy_metadata();
+
+		// Assert that root can register an asset with id 1
+		assert_ok!(AssetRegistry::register_asset(Origin::root(), metadata.clone(), Some(1)));
+
+		// Assert that only Account42 can register asset with id 42
+		let metadata = AssetMetadata {
+			location: None,
+			..dummy_metadata()
+		};
+
+		// It fails when signed with root...
+		assert_noop!(
+			AssetRegistry::register_asset(Origin::root(), metadata.clone(), Some(2)),
+			BadOrigin
+		);
+		// It works when signed with the right account
+		assert_ok!(AssetRegistry::register_asset(
+			Origin::signed(AdminAssetTwo::get()),
+			metadata,
+			Some(2)
+		));
 	});
 }
