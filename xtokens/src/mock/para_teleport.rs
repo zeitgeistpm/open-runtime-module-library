@@ -138,6 +138,7 @@ pub type Barrier = (TakeWeightCredit, AllowTopLevelPaidExecutionFrom<Everything>
 pub struct XcmConfig;
 impl Config for XcmConfig {
 	type Call = Call;
+	type CallDispatcher = Call;
 	type XcmSender = XcmRouter;
 	type AssetTransactor = LocalAssetTransactor;
 	type OriginConverter = XcmOriginToCallOrigin;
