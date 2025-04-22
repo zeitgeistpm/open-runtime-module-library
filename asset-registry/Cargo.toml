@@ -27,7 +27,7 @@ xcm-builder = { workspace = true }
 xcm-executor = { workspace = true }
 
 # orml
-orml-traits = { path = "../traits", version = "1.0.0", default-features = false }
+orml-traits = { git = "https://github.com/zeitgeistpm/open-runtime-module-library", branch = "zeitgeist-polkadot-stable2409", default-features = false }
 
 # for runtime-benchmarks
 polkadot-runtime-common = { workspace = true, optional = true }
